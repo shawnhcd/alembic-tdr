@@ -1560,11 +1560,6 @@ ReadObjectHeaders( Ogawa::IGroupPtr iGroup,
     Ogawa::IDataPtr data = iGroup->getData( iIndex, iThreadId );
     ABCA_ASSERT( data, "ReadObjectHeaders Invalid data at index " << iIndex );
 
-    if ( data->getSize() )
-    {
-        return;
-    }
-
     std::vector< char > buf( data->getSize() );
     if ( buf.empty() )
     {
