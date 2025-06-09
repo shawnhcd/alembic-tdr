@@ -1356,7 +1356,7 @@ ReadData( void * iIntoLocation,
     }
     std::size_t dataSize = iData->getSize();
 
-    if ( dataSize < 16 )
+    if ( dataSize <= 0 )
     {
         ABCA_ASSERT( dataSize == 0,
             "Incorrect data, expected to be empty or to have a key and data");
@@ -1365,7 +1365,7 @@ ReadData( void * iIntoLocation,
 
     if ( curPod == Alembic::Util::kStringPOD )
     {
-        if ( dataSize <= 16 )
+        if ( dataSize <= 0 )
         {
             return;
         }
@@ -1373,9 +1373,9 @@ ReadData( void * iIntoLocation,
         std::string * strPtr =
             reinterpret_cast< std::string * > ( iIntoLocation );
 
-        std::size_t numChars = dataSize - 16;
+        std::size_t numChars = dataSize;
         char * buf = new char[ numChars ];
-        iData->read( numChars, buf, 16, iThreadId );
+        iData->read( numChars, buf, 0, iThreadId );
 
         std::size_t startStr = 0;
         std::size_t strPos = 0;
@@ -1394,7 +1394,7 @@ ReadData( void * iIntoLocation,
     }
     else if ( curPod == Alembic::Util::kWstringPOD )
     {
-        if ( dataSize <= 16 )
+        if ( dataSize <= 0 )
         {
             return;
         }
@@ -1402,9 +1402,9 @@ ReadData( void * iIntoLocation,
         std::wstring * wstrPtr =
             reinterpret_cast< std::wstring * > ( iIntoLocation );
 
-        std::size_t numChars = ( dataSize - 16 ) / 4;
+        std::size_t numChars = ( dataSize - 0 ) / 4;
         Util::uint32_t * buf = new Util::uint32_t[ numChars ];
-        iData->read( dataSize - 16, buf, 16, iThreadId );
+        iData->read( dataSize, buf, 0, iThreadId );
 
         std::size_t strPos = 0;
 
@@ -1428,14 +1428,14 @@ ReadData( void * iIntoLocation,
     else if ( iAsPod == curPod )
     {
         // don't read the key
-        iData->read( dataSize - 16, iIntoLocation, 16, iThreadId );
+        iData->read( dataSize, iIntoLocation, 0, iThreadId );
     }
     else if ( PODNumBytes( curPod ) <= PODNumBytes( iAsPod ) )
     {
         // - 16 to skip key
-        std::size_t numBytes = dataSize - 16;
+        std::size_t numBytes = dataSize;
 
-        iData->read( numBytes, iIntoLocation, 16, iThreadId );
+        iData->read( numBytes, iIntoLocation, 0, iThreadId );
 
         char * buf = static_cast< char * >( iIntoLocation );
         ConvertData( curPod, iAsPod, buf, iIntoLocation, numBytes );
@@ -1444,11 +1444,11 @@ ReadData( void * iIntoLocation,
     else if ( PODNumBytes( curPod ) > PODNumBytes( iAsPod ) )
     {
         // - 16 to skip key
-        std::size_t numBytes = dataSize - 16;
+        std::size_t numBytes = dataSize;
 
         // read into a temporary buffer and cast them one at a time
         char * buf = new char[ numBytes ];
-        iData->read( numBytes, buf, 16, iThreadId );
+        iData->read( numBytes, buf, 0, iThreadId );
 
         ConvertData( curPod, iAsPod, buf, iIntoLocation, numBytes );
 
@@ -1560,13 +1560,12 @@ ReadObjectHeaders( Ogawa::IGroupPtr iGroup,
     Ogawa::IDataPtr data = iGroup->getData( iIndex, iThreadId );
     ABCA_ASSERT( data, "ReadObjectHeaders Invalid data at index " << iIndex );
 
-    if ( data->getSize() <= 32 )
+    if ( data->getSize() )
     {
         return;
     }
 
-    // skip the last 32 bytes which contains the hashes
-    std::vector< char > buf( data->getSize() - 32 );
+    std::vector< char > buf( data->getSize() );
     if ( buf.empty() )
     {
         return;
