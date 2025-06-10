@@ -59,7 +59,7 @@ ReadDimensions( Ogawa::IDataPtr iDims,
                 const AbcA::DataType &iDataType,
                 Util::Dimensions & oDim )
 {
-    if ( iData->getSize() < 16 )
+    if ( iData->getSize() <= 0 )
     {
         oDim = Util::Dimensions( 0 );
     }
@@ -67,11 +67,11 @@ ReadDimensions( Ogawa::IDataPtr iDims,
     else if ( iDims->getSize() == 0 )
     {
         std::size_t numItems =
-            ( iData->getSize() - 16 ) / iDataType.getNumBytes();
+            ( iData->getSize() ) / iDataType.getNumBytes();
 
         // for misshaped data bump up our dimensions by 1 so we have
         // more allocated for the partial read
-        if (( iData->getSize() - 16 ) % iDataType.getNumBytes() != 0)
+        if (( iData->getSize() ) % iDataType.getNumBytes() != 0)
         {
             numItems += 1;
         }
@@ -104,14 +104,14 @@ ReadDimensions( Ogawa::IDataPtr iDims,
         if ( iDataType.getPod() != Alembic::Util::kStringPOD &&
              iDataType.getPod() != Alembic::Util::kWstringPOD &&
              (iDataType.getNumBytes() * oDim.numPoints() >
-                iData->getSize() - 16) )
+                iData->getSize() ) )
         {
             std::size_t numItems =
-                ( iData->getSize() - 16 ) / iDataType.getNumBytes();
+                ( iData->getSize() ) / iDataType.getNumBytes();
 
             // for misshaped data bump up our dimensions by 1 so we have
             // more allocated for the partial read
-            if (( iData->getSize() - 16 ) % iDataType.getNumBytes() != 0)
+            if (( iData->getSize() ) % iDataType.getNumBytes() != 0)
             {
                 numItems += 1;
             }
