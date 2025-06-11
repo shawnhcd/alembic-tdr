@@ -201,6 +201,9 @@ IF (DOCS_PATH)
     FIND_PACKAGE(Doxygen)
 ENDIF()
 
+# zstd
+INCLUDE("./cmake/zstd.cmake")
+
 # IlmBase
 INCLUDE("./cmake/AlembicIlmBase.cmake")
 

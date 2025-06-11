@@ -58,6 +58,14 @@ ReadDimensions( Ogawa::IDataPtr iDims,
 
 //-*****************************************************************************
 void
+ReadTDRDimensions( Ogawa::IDataPtr iDims,
+                Ogawa::IDataPtr iData,
+                size_t iThreadId,
+                const AbcA::DataType &iDataType,
+                Util::Dimensions & oDim );
+
+//-*****************************************************************************
+void
 ReadData( void * iIntoLocation,
           Ogawa::IDataPtr iData,
           size_t iThreadId,

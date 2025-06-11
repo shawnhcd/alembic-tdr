@@ -184,7 +184,7 @@ void AprImpl::getDimensions( index_t iSampleIndex,
     Ogawa::IDataPtr dims = m_group->getData(index + 1, id);
     Ogawa::IDataPtr data = m_group->getData(index, id);
 
-    ReadDimensions( dims, data, id, m_header->header.getDataType(), oDim );
+    ReadTDRDimensions( dims, data, id, m_header->header.getDataType(), oDim );
 
 }
 

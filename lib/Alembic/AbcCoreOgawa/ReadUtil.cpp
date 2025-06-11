@@ -35,6 +35,9 @@
 //-*****************************************************************************
 
 #include <Alembic/AbcCoreOgawa/ReadUtil.h>
+#include <cstddef>
+#include <cstdlib>
+#include <zstd.h>
 
 #if defined(_MSC_VER)
 #  if defined(max)
@@ -59,7 +62,7 @@ ReadDimensions( Ogawa::IDataPtr iDims,
                 const AbcA::DataType &iDataType,
                 Util::Dimensions & oDim )
 {
-    if ( iData->getSize() <= 0 )
+    if ( iData->getSize() < 16 )
     {
         oDim = Util::Dimensions( 0 );
     }
@@ -67,11 +70,11 @@ ReadDimensions( Ogawa::IDataPtr iDims,
     else if ( iDims->getSize() == 0 )
     {
         std::size_t numItems =
-            ( iData->getSize() ) / iDataType.getNumBytes();
+            ( iData->getSize() - 16 ) / iDataType.getNumBytes();
 
         // for misshaped data bump up our dimensions by 1 so we have
         // more allocated for the partial read
-        if (( iData->getSize() ) % iDataType.getNumBytes() != 0)
+        if (( iData->getSize() - 16 ) % iDataType.getNumBytes() != 0)
         {
             numItems += 1;
         }
@@ -104,14 +107,90 @@ ReadDimensions( Ogawa::IDataPtr iDims,
         if ( iDataType.getPod() != Alembic::Util::kStringPOD &&
              iDataType.getPod() != Alembic::Util::kWstringPOD &&
              (iDataType.getNumBytes() * oDim.numPoints() >
-                iData->getSize() ) )
+                iData->getSize() - 16) )
         {
             std::size_t numItems =
-                ( iData->getSize() ) / iDataType.getNumBytes();
+                ( iData->getSize() - 16 ) / iDataType.getNumBytes();
 
             // for misshaped data bump up our dimensions by 1 so we have
             // more allocated for the partial read
-            if (( iData->getSize() ) % iDataType.getNumBytes() != 0)
+            if (( iData->getSize() - 16 ) % iDataType.getNumBytes() != 0)
+            {
+                numItems += 1;
+            }
+
+            oDim = Util::Dimensions( numItems );
+        }
+    }
+}
+
+//-*****************************************************************************
+void
+ReadTDRDimensions( Ogawa::IDataPtr iDims,
+                Ogawa::IDataPtr iData,
+                size_t iThreadId,
+                const AbcA::DataType &iDataType,
+                Util::Dimensions & oDim )
+{
+    if ( iData->getSize() < 8 )
+    {
+        oDim = Util::Dimensions( 0 );
+    }
+    // find it based on of the size of the data
+    else if ( iDims->getSize() == 0 )
+    {
+        // read the origin data size
+        std::size_t originDataSize = 0;
+        iData->read(8, &originDataSize, 0, 0);
+        std::size_t numItems =
+            originDataSize / iDataType.getNumBytes();
+
+        // for misshaped data bump up our dimensions by 1 so we have
+        // more allocated for the partial read
+        if (originDataSize % iDataType.getNumBytes() != 0)
+        {
+            numItems += 1;
+        }
+
+        oDim = Util::Dimensions( numItems );
+    }
+    // we need to read our dimensions
+    else
+    {
+        // read the origin data size
+        std::size_t originDataSize = 0;
+        iData->read(8, &originDataSize, 0, 0);
+
+        // we write them as uint64_t so / 8
+        std::size_t numRanks = iDims->getSize() / 8;
+
+        oDim.setRank( numRanks );
+
+        std::vector< Util::uint64_t > dims( numRanks );
+        if ( dims.empty() )
+        {
+            return;
+        }
+
+        iDims->read( numRanks * 8, &( dims.front() ), 0, iThreadId );
+        for ( std::size_t i = 0; i < numRanks; ++i )
+        {
+            oDim[i] = dims[i];
+        }
+
+        // we have less data than what the dimensions suggest
+        // we should, so calculate them based on what we have
+        if ( iDataType.getPod() != Alembic::Util::kStringPOD &&
+             iDataType.getPod() != Alembic::Util::kWstringPOD &&
+             (iDataType.getNumBytes() * oDim.numPoints() >
+                originDataSize ) )
+        {
+            std::size_t numItems =
+                originDataSize / iDataType.getNumBytes();
+
+            // for misshaped data bump up our dimensions by 1 so we have
+            // more allocated for the partial read
+            if (originDataSize % iDataType.getNumBytes() != 0)
             {
                 numItems += 1;
             }
@@ -1459,6 +1538,152 @@ ReadData( void * iIntoLocation,
 
 //-*****************************************************************************
 void
+ReadArrayData( void * iIntoLocation,
+          Ogawa::IDataPtr iData,
+          size_t iThreadId,
+          const AbcA::DataType &iDataType,
+          Util::PlainOldDataType iAsPod)
+{
+    Alembic::Util::PlainOldDataType curPod = iDataType.getPod();
+    ABCA_ASSERT( ( iAsPod == curPod ) || (
+        iAsPod != Alembic::Util::kStringPOD &&
+        iAsPod != Alembic::Util::kWstringPOD &&
+        curPod != Alembic::Util::kStringPOD &&
+        curPod != Alembic::Util::kWstringPOD ),
+        "Cannot convert the data to or from a string, or wstring." );
+
+    if ( !iData )
+    {
+        ABCA_THROW("ReadData invalid: Null IDataPtr.");
+        return;
+    }
+
+    std::size_t dataSize = iData->getSize();
+
+    if ( dataSize < 8 )
+    {
+        ABCA_ASSERT( dataSize == 0,
+            "Incorrect data, expected to be empty or to have a key and data");
+        return;
+    }
+
+    // the decompressed data size
+    std::size_t decompressedDataSize = 0;
+    iData->read(8, &decompressedDataSize, 0, 0);
+
+    if ( curPod == Alembic::Util::kStringPOD )
+    {
+        if ( dataSize <= 8 )
+        {
+            return;
+        }
+
+        std::string * strPtr =
+            reinterpret_cast< std::string * > ( iIntoLocation );
+
+        std::size_t numChars = dataSize - 8;
+        char * buf = new char[ numChars ];
+        iData->read( numChars, buf, 8, iThreadId );
+
+        // decompress the zstd data
+        char * newBuf = new char[ decompressedDataSize ];
+        size_t result = ZSTD_decompress(newBuf, decompressedDataSize, buf, numChars);
+
+        std::size_t startStr = 0;
+        std::size_t strPos = 0;
+
+        for ( std::size_t i = 0; i < numChars; ++i )
+        {
+            if ( newBuf[i] == 0 )
+            {
+                strPtr[strPos] = newBuf + startStr;
+                startStr = i + 1;
+                strPos ++;
+            }
+        }
+
+        delete [] buf;
+        delete [] newBuf;
+    }
+    else if ( curPod == Alembic::Util::kWstringPOD )
+    {
+        if ( dataSize <= 8 )
+        {
+            return;
+        }
+
+        std::wstring * wstrPtr =
+            reinterpret_cast< std::wstring * > ( iIntoLocation );
+
+        std::size_t numChars = ( dataSize - 8 ) / 4;
+        Util::uint32_t * buf = new Util::uint32_t[ numChars ];
+        iData->read( dataSize - 8, buf, 8, iThreadId );
+
+        // decompress the zstd data
+        Util::uint32_t * newBuf = new Util::uint32_t[ decompressedDataSize / 4 ];
+        size_t result = ZSTD_decompress(newBuf, decompressedDataSize / 4, buf, numChars);
+
+        std::size_t strPos = 0;
+
+        // push these one at a time until we can figure out how to cast like
+        // strings above
+        for ( std::size_t i = 0; i < numChars; ++i )
+        {
+            std::wstring & wstr = wstrPtr[strPos];
+            if ( newBuf[i] == 0 )
+            {
+                strPos ++;
+            }
+            else
+            {
+                wstr.push_back( newBuf[i] );
+            }
+        }
+
+        delete [] buf;
+        delete [] newBuf;
+    }
+    else if ( iAsPod == curPod )
+    {
+        // don't read the key
+        char * buf = new char[ dataSize - 8 ];
+        iData->read( dataSize - 8, buf, 8, iThreadId );
+        size_t result = ZSTD_decompress(iIntoLocation, decompressedDataSize, buf, dataSize - 8);
+
+        delete [] buf;
+    }
+    else if ( PODNumBytes( curPod ) <= PODNumBytes( iAsPod ) )
+    {
+        std::size_t numBytes = dataSize - 8;
+
+        char * compressedBuf = new char[ numBytes ];
+        iData->read( numBytes, compressedBuf, 8, iThreadId );
+        size_t result = ZSTD_decompress(iIntoLocation, decompressedDataSize, compressedBuf, numBytes);
+
+        char * buf = static_cast< char * >( iIntoLocation );
+        ConvertData( curPod, iAsPod, buf, iIntoLocation, numBytes );
+
+        delete [] compressedBuf;
+    }
+    else if ( PODNumBytes( curPod ) > PODNumBytes( iAsPod ) )
+    {
+        std::size_t numBytes = dataSize - 8;
+
+        char * compressedBuf = new char[ numBytes ];
+        iData->read( numBytes, compressedBuf, 8, iThreadId );
+
+        char * buf = new char[ decompressedDataSize ];
+        size_t result = ZSTD_decompress(buf, decompressedDataSize, compressedBuf, numBytes);
+        ConvertData( curPod, iAsPod, buf, iIntoLocation, numBytes );
+
+        delete [] buf;
+        delete [] compressedBuf;
+    }
+
+}
+
+//-*****************************************************************************
+void
 ReadArraySample( Ogawa::IDataPtr iDims,
                  Ogawa::IDataPtr iData,
                  size_t iThreadId,
@@ -1467,11 +1692,11 @@ ReadArraySample( Ogawa::IDataPtr iDims,
 {
     // get our dimensions
     Util::Dimensions dims;
-    ReadDimensions( iDims, iData, iThreadId, iDataType, dims );
+    ReadTDRDimensions( iDims, iData, iThreadId, iDataType, dims );
 
     oSample = AbcA::AllocateArraySample( iDataType, dims );
 
-    ReadData( const_cast<void*>( oSample->getData() ), iData,
+    ReadArrayData( const_cast<void*>( oSample->getData() ), iData,
         iThreadId, iDataType, iDataType.getPod() );
 }
 
